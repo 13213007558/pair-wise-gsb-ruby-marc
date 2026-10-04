@@ -31,6 +31,36 @@ reader.each do |record|
 end
 ```
 
+### Working with subfield `$8` link groups
+
+Subfield `$8` connects fields that together represent one repeatable
+construct. Its value begins with the link number. A hyphen or period may
+separate an optional two-digit sequence number, and a backslash-prefixed
+letter may identify the link type; for example, `1-2\p` uses link number
+`1`, sequence `2`, and link type `p`. A field can contain multiple `$8`
+subfields, which means it participates in multiple link groups.
+
+`MARC::Record#link_groups` returns a view grouped by link number while
+leaving every field at its original record position. The view reports
+missing sequence numbers, duplicate sequence numbers, and inconsistent link
+types. Reordering changes only the sequence values in the selected group:
+other groups, unlinked fields, and field positions are untouched.
+
+```ruby
+view = record.link_groups
+plan = view.plan_reorder(1, [field_one, shared_field, field_two])
+
+return unless plan.valid?
+
+modified_record = plan.apply
+# Or change a link number itself, preserving each member's sequence suffix.
+renumber_plan = view.plan_renumber(1 => 10)
+```
+
+The plan is inspectable data, including its changes and validation errors.
+With no argument, `apply` writes the plan to a deep copy of the record;
+pass an explicit record to apply to that record instead.
+
 
 ### Reading / Writing MARC21 binary data
 

@@ -203,6 +203,11 @@ module MARC
       flds
     end
 
+    # Return a view of subfield $8 link groups in this record.
+    def link_groups
+      MARC::LinkGroupView.new(self)
+    end
+
     # Returns an array of all of the tags that appear in the record (not necessarily in the order they appear).
     def tags
       @fields.tag_list
