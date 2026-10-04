@@ -31,6 +31,37 @@ reader.each do |record|
 end
 ```
 
+### Fixed-field layouts
+
+MARC21 `008` fields use different byte layouts depending on the record type.
+`MARC::FixedField` provides named views for books, continuing resources, and
+cartographic materials, plus matching `006` layouts selected from the field's
+first type byte.
+
+```ruby
+view = record.fixed_field("008")
+view.layout.id                 #=> :marc21_book
+view[:date_type].raw           #=> "s"
+view[:date_type].label         #=> "Single known date"
+view.offset_of(:literary_form) #=> 33
+view.name_at(33)               #=> :literary_form
+
+begin
+  view[:date1] = "bad"
+rescue MARC::FixedField::View::ValidationError => error
+  puts error.message
+end
+```
+
+Spaces, fill characters (`|`), and unrecognized codes remain distinct raw
+values. Editing validates coded values, segment widths, and linked date rules.
+Changing record type requires an explicit migration rule; ruby-marc will not
+write an old `008` layout into a newly typed record.
+
+```ruby
+MARC::FixedField.migrate(record, layout: :marc21_map, rule: :preserve_common)
+```
+
 
 ### Reading / Writing MARC21 binary data
 

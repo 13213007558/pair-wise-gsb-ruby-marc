@@ -177,6 +177,18 @@ module MARC
       find { |f| f.tag == tag }
     end
 
+    def fixed_field(tag = "008", layout: nil)
+      field = self[tag]
+      unless field
+        field = MARC::ControlField.new(tag, tag == "006" ? " " * 18 : " " * 40)
+        append(field)
+      end
+      type_byte = tag == "006" && field.value ? field.value[0] : nil
+      selected = layout || MARC::FixedField.layout_for(self, tag, type_byte: type_byte)
+      MARC::FixedField.assert_layout!(selected, self, tag, type_byte)
+      MARC::FixedField::View.new(field, layout: selected)
+    end
+
     # Provides a backwards compatible means to access the FieldMap.
     # No argument returns the FieldMap array in entirety.  Providing
     # a string, array or range of tags will return an array of fields
