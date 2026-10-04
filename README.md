@@ -32,6 +32,48 @@ end
 ```
 
 
+### Fixed-field layouts
+
+The MARC21 008 is a position-coded control field. MARC::Record#fixed_field
+returns a semantic view using layouts for books, serials, and maps. The
+layout is selected from Leader bytes 06 and 07.
+
+~~~ruby
+view = record.fixed_field
+view[:date_type]             #=> "s"
+view.fetch("出版状态")        # serial layout
+view.offset_of(:language)    #=> 35
+view.name_at(18)             #=> :illustrations or :frequency
+~~~
+
+Spaces, MARC fill characters (the pipe character), and unknown codes remain
+distinct. An unknown code is reported by errors, but is left untouched
+unless that exact position is edited.
+
+~~~ruby
+view.errors
+view.set(:language, "eng")
+view.update(date_type: "i", date1: "2000", date2: "1999")
+~~~
+
+Changing a record's Leader to another type can change 008 semantics, so
+ruby-marc does not silently reinterpret or overwrite the field. Choose a
+migration rule explicitly.
+
+~~~ruby
+record.leader[6] = "a"
+record.migrate_fixed_field(to: :book, rule: :blank)
+record.migrate_fixed_field(to: :serial, rule: :preserve_common)
+record.migrate_fixed_field(to: :map) do |source, target_layout, record|
+  value = " " * 40
+  # Build the new 008 according to your local migration policy.
+  value
+end
+~~~
+
+Additional layouts can be declared with MARC::FixedField::Layout.define
+(or registered with MARC::FixedField.declare).
+
 ### Reading / Writing MARC21 binary data
 
 ```ruby
