@@ -140,6 +140,31 @@ module MARC
       @fields.clean = false
     end
 
+    def deep_dup
+      copy = self.class.new
+      copy.leader = leader.dup
+      each do |field|
+        copy <<
+          if field.is_a?(MARC::DataField)
+            duplicated = field.class.new(field.tag, field.indicator1.dup, field.indicator2.dup)
+            field.subfields.each do |subfield|
+              duplicated.append MARC::Subfield.new(subfield.code.dup, subfield.value.dup)
+            end
+            duplicated
+          else
+            field.class.new(field.tag.dup, field.value.dup)
+          end
+      end
+      copy
+    end
+
+    def field_link_group_view
+      MARC::FieldLinkGroupView.new(self)
+    end
+
+    alias link_group_view field_link_group_view
+    alias linked_field_group_view field_link_group_view
+
     # alias to append
 
     def <<(field)

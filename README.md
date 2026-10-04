@@ -31,6 +31,30 @@ reader.each do |record|
 end
 ```
 
+### Reordering subfield `$8` field-link groups
+
+Subfield `$8` connects fields with a linking number. The optional sequence
+number defines the order of fields within that logical group, and the optional
+one-character code identifies the link type. For example, `"3.1\p"` means
+sequence 1 in link group 3 with type `p`; a bare `"3"` is the conventional
+unnumbered first member.
+
+The link-group view never moves record fields. Reordering produces a plan that
+only changes the relevant `$8` values. A field may contain several `$8`
+subfields and participate in multiple groups; changing one group leaves the
+other memberships intact.
+
+```ruby
+view = record.field_link_group_view
+
+view.issues            # invalid subfield 8 syntax
+view.group(1).issues   # gaps, duplicate sequences, or inconsistent types
+
+plan = view.reorder_group(1, [field_one, field_three, field_two])
+plan.groups            # inspect the projected groups first
+updated = plan.apply   # returns a modified deep copy of the record
+```
+
 
 ### Reading / Writing MARC21 binary data
 
