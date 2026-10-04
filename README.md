@@ -176,6 +176,57 @@ methods (e.g., `MARC::Writer.encode`, `MARC::XMLWriter.encode`, etc.)
 Note that * `record.to_xml`, for historical reasons, returns an REXML document of
 the XML serialization and _not_ an XML string as one might expect. 
 
+### Linked fields: original vs. alternate script ($6 / 880)
+
+An original field is paired with its alternate-script representation through
+`$6` subfields. The original field carries e.g. `$6 880-01/$1`, and the
+accompanying 880 field carries `$6 245-01/$1`. A `$6` value is made of:
+
+* a **tag** (the tag on the other side; an 880 names the original tag);
+* an **occurrence** number (`-01`, `-02`, ...) shared by the pair, which
+  disambiguates records that contain several fields with the same tag;
+* an optional two-character **script identification code** (e.g. `$1`,
+  `(3`);
+* optional **direction** information, `/r` (right-to-left) or `/r/`
+  (right-to-left with left-to-right content).
+
+Read and edit these relationships as groups instead of assembling `$6`
+yourself:
+
+```ruby
+record.field_link_groups.each do |group|
+  group.tag           # original tag, e.g. "245"
+  group.occurrence    # occurrence number, e.g. 1
+  group.field         # the original field
+  group.alternate     # the 880 field (may be nil)
+  group.paired?       # both sides present?
+end
+
+# find one group
+record.field_link_group("245", 1)
+
+# append a pair; occurrence numbers are picked automatically
+group = record.append_field_link(
+  MARC::DataField.new("245", "1", "0", ["a", "Title"]),
+  MARC::DataField.new("880", "1", "0", ["a", "标题"]),
+  script: "$1"
+)
+# original $6 is "880-01/$1", 880 $6 is "245-01/$1"
+
+record.delete_field_link("245", 2)                     # both sides
+record.delete_field_link("245", 2, member: :alternate) # keep the original
+record.renumber_field_links                             # compact 01, 02, ...
+```
+
+Ordering is deterministic: on append, the 880 is placed directly after its
+original and a new `$6` becomes the first subfield (existing subfields keep
+their order); renumbering never moves fields or `$6` subfields, and keeps
+each link's script and direction. All mutation methods validate the whole
+record first — a malformed `$6`, a duplicate occurrence number, or multiple
+880s claiming the same original raises `MARC::LinkException`,
+`MARC::DuplicateLinkException`, or `MARC::AmbiguousLinkException` before
+anything is changed. A field with no partner (an original awaiting its 880,
+or an 880 whose original is absent) is a legal unpaired group and is kept.
 
 ## Benchmarking reading MARC in various formats
 

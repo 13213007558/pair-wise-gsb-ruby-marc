@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### New features
+
+- Grouped reading and editing of original/alternate-script field pairs
+  linked through `$6` and 880 fields: `Record#field_link_groups`,
+  `Record#field_link_group`, `Record#append_field_link`,
+  `Record#delete_field_link`, `Record#renumber_field_links`, plus
+  `MARC::FieldLink` and `MARC::FieldLinkGroup`. Groups are keyed by tag
+  plus occurrence number, so same-tag fields are never merged. Malformed
+  `$6`, duplicate occurrence numbers and one-to-many 880 relationships
+  raise dedicated exceptions, and mutations validate the whole record
+  before changing it.
+
 ## [1.4] - 2026-01-22
 
 ### Breaking Change
