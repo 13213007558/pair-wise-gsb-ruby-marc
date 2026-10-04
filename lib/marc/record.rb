@@ -208,6 +208,108 @@ module MARC
       @fields.tag_list
     end
 
+    # Returns all $6-linked original/880 groups in record order. A group may be
+    # legitimately unpaired when an original field or its 880 counterpart is
+    # missing. Pass strict: true to raise instead of collecting linkage errors.
+    def linked_field_groups(strict: false)
+      collection = MARC::LinkedFieldAnalyzer.analyze(self)
+      if strict && !collection.valid?
+        raise collection.errors.first
+      end
+      collection
+    end
+    alias_method :linked_groups, :linked_field_groups
+
+    def linked_field_group_errors
+      linked_field_groups.errors
+    end
+
+    def valid_linked_field_groups?
+      linked_field_groups.valid?
+    end
+
+    def linked_field_group(tag, occurrence)
+      linked_field_groups[tag, occurrence]
+    end
+
+    # Append one original field and one linked 880 alternate-script field.
+    # The caller supplies field content without $6; ruby-marc assigns and
+    # inserts both $6 subfields. Fields are appended original-first.
+    def append_linked_field_group(original, alternate, occurrence: nil, script: nil, right_to_left: false)
+      original = require_data_field(original, "original field")
+      alternate = require_data_field(alternate, "alternate field")
+
+      if original.tag == "880"
+        raise MARC::InvalidLinkedFieldException, "original field cannot have tag 880"
+      end
+      unless alternate.tag == "880"
+        raise MARC::InvalidLinkedFieldException, "alternate field must have tag 880"
+      end
+      if original.link_subfield || alternate.link_subfield
+        raise MARC::InvalidLinkedFieldException, "fields passed to a new linked group must not include $6"
+      end
+      if @fields.include?(original) || @fields.include?(alternate)
+        raise MARC::InvalidLinkedFieldException, "fields passed to a new linked group are already in the record"
+      end
+
+      collection = linked_field_groups(strict: true)
+      occurrence = occurrence ? requested_link_occurrence(occurrence, collection) : next_link_occurrence(collection)
+      check_appendable(original)
+      check_appendable(alternate)
+      raise frozen_error_class, "can't modify frozen MARC::Record" if @fields.frozen?
+
+      original_link = MARC::FieldLink.new("880", occurrence)
+      alternate_link = MARC::FieldLink.new(original.tag, occurrence, script, right_to_left)
+      original.subfields.unshift(MARC::Subfield.new("6", original_link.to_s))
+      alternate.subfields.unshift(MARC::Subfield.new("6", alternate_link.to_s))
+      append(original)
+      append(alternate)
+
+      linked_field_groups[original.tag, occurrence]
+    end
+    alias_method :append_linked_group, :append_linked_field_group
+
+    # Delete a linked group identified by a MARC::LinkedFieldGroup, a field,
+    # or a tag and occurrence. Unpaired groups delete the side that exists.
+    def delete_linked_field_group!(group_or_field, occurrence = nil)
+      collection = linked_field_groups(strict: true)
+      group = resolve_linked_group(collection, group_or_field, occurrence)
+      ensure_linked_fields_mutable(group)
+
+      group.fields.each { |field| @fields.delete(field) }
+      @fields.clean = false
+      group
+    end
+    alias_method :delete_linked_group!, :delete_linked_field_group!
+    alias_method :delete_linked_field_group, :delete_linked_field_group!
+
+    # Reassign all occurrence numbers densely in group order. Script and
+    # orientation information on 880 fields is preserved. Field order does not
+    # change; $6 is normalized to be the first subfield and other subfields
+    # retain their order.
+    def renumber_linked_field_groups!
+      collection = MARC::LinkedFieldAnalyzer.analyze(self, allow_duplicate_occurrences: true)
+      fatal_errors = collection.errors.reject do |error|
+        error.is_a?(MARC::DuplicateOccurrenceNumberException)
+      end
+      raise fatal_errors.first if fatal_errors.any?
+      raise_ambiguous_renumber_groups(collection)
+      raise frozen_error_class, "can't modify frozen MARC::Record" if @fields.frozen?
+      collection.flat_map(&:fields).each { |field| check_appendable(field) }
+
+      units = renumber_units(collection)
+      units.each_with_index do |unit, index|
+        occurrence = MARC::FieldLink.format_occurrence(index + 1)
+        unit.each do |field|
+          replace_link(field, updated_link(field, occurrence))
+        end
+      end
+      @fields.clean = false
+      linked_field_groups(strict: true)
+    end
+    alias_method :renumber_linked_groups!, :renumber_linked_field_groups!
+    alias_method :renumber_linked_field_groups, :renumber_linked_field_groups!
+
     # Factory method for creating a MARC::Record from MARC21 in
     # transmission format.
     #
@@ -343,6 +445,113 @@ module MARC
 
     def =~(regex)
       to_s =~ regex
+    end
+
+    private
+
+    def require_data_field(field, name)
+      unless field.is_a?(MARC::DataField)
+        raise MARC::InvalidLinkedFieldException, "#{name} must be a MARC::DataField"
+      end
+      field
+    end
+
+    def next_link_occurrence(collection)
+      used = Hash.new(false)
+      collection.each do |group|
+        (group.original_fields + group.alternate_fields).each do |field|
+          used[field.link.occurrence] = true
+        end
+      end
+
+      1.upto(99) do |number|
+        occurrence = MARC::FieldLink.format_occurrence(number)
+        return occurrence unless used[occurrence]
+      end
+      raise MARC::LinkedFieldException, "no unused link occurrence number is available"
+    end
+
+    def requested_link_occurrence(occurrence, collection)
+      formatted = MARC::FieldLink.format_occurrence(occurrence)
+      if collection.any? { |group| group.occurrence == formatted }
+        raise MARC::DuplicateOccurrenceNumberException,
+          "occurrence number #{formatted} is already in use"
+      end
+      formatted
+    end
+
+    def check_appendable(field)
+      if field.frozen? || field.subfields.frozen?
+        raise frozen_error_class, "can't modify frozen MARC::DataField"
+      end
+    end
+
+    def resolve_linked_group(collection, group_or_field, occurrence)
+      if group_or_field.is_a?(MARC::LinkedFieldGroup)
+        group = collection[group_or_field.tag, group_or_field.occurrence]
+      elsif group_or_field.is_a?(MARC::DataField)
+        link = group_or_field.link
+        unless link
+          raise MARC::InvalidLinkedFieldException, "field has no $6 link"
+        end
+        tag = group_or_field.tag == "880" ? link.tag : group_or_field.tag
+        group = collection[tag, link.occurrence]
+      elsif occurrence && group_or_field.is_a?(String)
+        group = collection[group_or_field, occurrence]
+      else
+        raise ArgumentError, "expected a linked group, linked field, or tag and occurrence"
+      end
+
+      unless group
+        raise MARC::LinkedFieldException, "linked field group was not found"
+      end
+      group
+    end
+
+    def ensure_linked_fields_mutable(group)
+      raise frozen_error_class, "can't modify frozen MARC::Record" if @fields.frozen?
+    end
+
+    def raise_ambiguous_renumber_groups(collection)
+      collection.each do |group|
+        next if group.unpaired?
+        if group.original_fields.length != 1 || group.alternate_fields.length != 1
+          raise MARC::OneToManyLinkedFieldException,
+            "cannot renumber ambiguous group #{group.tag} occurrence #{group.occurrence}"
+        end
+      end
+    end
+
+    def renumber_units(collection)
+      units = []
+      collection.each do |group|
+        if group.paired?
+          units << group.fields
+        else
+          group.original_fields.each { |field| units << [field] }
+          group.alternate_fields.each { |field| units << [field] }
+        end
+      end
+      units.sort_by { |fields| fields.map { |field| @fields.index(field) }.min }
+    end
+
+    def updated_link(field, occurrence)
+      link = field.link
+      if field.tag == "880"
+        link.with(occurrence: occurrence)
+      else
+        MARC::FieldLink.new("880", occurrence)
+      end
+    end
+
+    def replace_link(field, link)
+      check_appendable(field)
+      field.subfields.reject! { |subfield| subfield.code == "6" }
+      field.subfields.unshift(MARC::Subfield.new("6", link.to_s))
+    end
+
+    def frozen_error_class
+      defined?(FrozenError) ? FrozenError : RuntimeError
     end
   end
 end

@@ -32,6 +32,72 @@ end
 ```
 
 
+### Linked original and alternate-script fields
+
+MARC connects an original data field to an alternate-script `880` field with
+subfield `$6`. A link has the shape
+`tag-occurrence[/script][/orientation]`:
+
+* The original field uses `$6 880-NN`, where `NN` is a two-digit occurrence
+  number such as `01` or `02`.
+* The `880` field uses `$6 <original-tag>-NN`, such as `$6 245-01`.
+* An optional script identification code follows the first slash, for example
+  `245-01/(3`. Script codes are preserved as supplied.
+* A final `/r` marks right-to-left content; omission means the default
+  left-to-right orientation. Example: `245-01/(3/r`.
+
+Groups are identified by both original tag and occurrence, so two `245`
+fields remain separate when they use `880-01` and `880-02`. Fields that simply
+share a tag are never grouped together. Fields without `$6` are ordinary,
+unlinked fields. An original field or an `880` field whose counterpart is
+missing is a valid unpaired group. Duplicate occurrence numbers and a field
+linked to multiple counterparts are distinct errors.
+
+The high-level methods create and maintain both `$6` subfields. They validate
+the complete record before changing it, so a failed append, delete, or
+renumber operation leaves the record and the supplied field objects unchanged.
+`$6` is always placed first in a linked field; all other subfields retain
+their relative order. Existing field order is preserved, while newly appended
+groups are added original field first, then the `880` field. Omit
+`occurrence:` to use the lowest unused number, or pass a two-digit number
+explicitly.
+
+```ruby
+record = MARC::Record.new
+
+first = record.append_linked_field_group(
+  MARC::DataField.new("245", "0", "0", ["a", "First title"]),
+  MARC::DataField.new("880", "0", "0", ["a", "العنوان الأول"]),
+  script: "(3", right_to_left: true
+)
+second = record.append_linked_field_group(
+  MARC::DataField.new("245", "0", "0", ["a", "Second title"]),
+  MARC::DataField.new("880", "0", "0", ["a", "العنوان الثاني"]),
+  script: "(3", right_to_left: true
+)
+
+record.linked_field_groups.each do |group|
+  puts [group.tag, group.occurrence, group.paired?, group.original["a"]].join(" / ")
+end
+
+record.delete_linked_field_group!(first)
+record.append_linked_field_group(
+  MARC::DataField.new("245", "0", "0", ["a", "Third title"]),
+  MARC::DataField.new("880", "0", "0", ["a", "العنوان الثالث"]),
+  script: "(3", right_to_left: true
+)
+
+# `second` still points to the same 245/880 pair. Dense reassignment is opt-in:
+groups = record.renumber_linked_field_groups!
+groups.valid? #=> true
+```
+
+Read existing groups with `record.linked_field_groups`. Pass `strict: true` to
+raise the first linkage error instead of returning it in
+`record.linked_field_group_errors`. `MARC::DataField#link` exposes the parsed
+`tag`, `occurrence`, `script`, and `right_to_left?` values for a field's `$6`.
+
+
 ### Reading / Writing MARC21 binary data
 
 ```ruby

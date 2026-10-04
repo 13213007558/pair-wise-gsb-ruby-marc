@@ -156,6 +156,17 @@ module MARC
       nil
     end
 
+    # Returns the first $6 subfield used to link a field to an 880 field.
+    def link_subfield
+      subfields.find { |subfield| subfield.code == "6" }
+    end
+
+    # Returns a parsed MARC::FieldLink for this field's $6 subfield, or nil.
+    def link
+      subfield = link_subfield
+      subfield ? MARC::FieldLink.parse(subfield.value) : nil
+    end
+
     def codes(dedup = true)
       codes = []
       @subfields.each { |s| codes << s.code }

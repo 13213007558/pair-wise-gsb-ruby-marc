@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- Added `MARC::FieldLink` and high-level `MARC::Record` methods for reading,
+  appending, deleting, and renumbering original/880 linked field groups.
+
 ## [1.4] - 2026-01-22
 
 ### Breaking Change

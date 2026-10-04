@@ -15,3 +15,22 @@ module MARC
     end
   end
 end
+
+module MARC
+  class LinkedFieldException < MARC::Exception
+  end
+
+  class InvalidLinkedFieldException < LinkedFieldException
+  end
+
+  class DuplicateOccurrenceNumberException < LinkedFieldException
+  end
+
+  class OneToManyLinkedFieldException < LinkedFieldException
+  end
+
+  LinkedFieldError = LinkedFieldException
+  InvalidLinkedFieldError = InvalidLinkedFieldException
+  DuplicateOccurrenceNumberError = DuplicateOccurrenceNumberException
+  OneToManyLinkedFieldError = OneToManyLinkedFieldException
+end
