@@ -217,10 +217,32 @@ from MARC21 leader byte 9, that is ignored.
 Consult the MARC::Reader class docs for a more complete discussion and range
 of options.
 
-The MARC binary Writer (MARC::Writer) does not have any encoding-related
-features -- it's up to you the developer to make sure you create MARC::Records
-with consistent and expected char encodings, although MARC::Writer will write
-out a legal ISO 2709 either way, it just might have corrupted encodings.
+The MARC binary Writer can transcode records from UTF-8 to legacy MARC-8:
+
+```ruby
+writer = MARC::Writer.new("myfile.marc", external_encoding: "MARC-8")
+writer.write(record)
+```
+
+The encoder handles G0/G1 designation, EACC multibyte characters, preposed
+combining marks, leader byte 9, and byte-accurate field lengths and directory
+offsets. Encoding state defaults independently for each field value. By default, a
+character that cannot be represented in MARC-8 raises
+`Encoding::UndefinedConversionError` with the original character position. Pass
+`invalid: :replace` and `replace:` to substitute caller-supplied text:
+
+```ruby
+writer = MARC::Writer.new(
+  "myfile.marc",
+  external_encoding: "MARC-8",
+  invalid: :replace,
+  replace: "[?]"
+)
+```
+
+Callers may limit the usable MARC-8 character sets with `allowed_charsets`,
+using integer designators (such as `0x45`) or names such as `"ANSEL"`,
+`"EACC"`, and `"BASIC_LATIN"`.
 
 When parsing MARCXML _with Nokogiri as your XML parser implementation_ up to
 and including version `1.0.2` of this gem, if the XML was badly formed,

@@ -24,19 +24,22 @@ module MARC
   #    writer.allow_oversized = true
   class Writer
     attr_accessor :allow_oversized
+    attr_reader :encoding_options
 
     # the constructor which you must pass a file path
     # or an object that responds to a write message
 
-    def initialize(file, &blk)
+    def initialize(file, **options, &blk)
       if file.instance_of?(String)
-        @fh = File.new(file, "w")
+        @fh = File.new(file, self.class.marc8?(options) ? "w:binary" : "w")
       elsif file.respond_to?(:write)
         @fh = file
       else
         raise ArgumentError, "must pass in file name or handle"
       end
       self.allow_oversized = false
+      @encoding_options = {}
+      options.each { |key, value| @encoding_options[key.to_sym] = value }
 
       if block_given?
         blk.call(self)
@@ -47,7 +50,7 @@ module MARC
     # write a record to the file or handle
 
     def write(record)
-      @fh.write(MARC::Writer.encode(record, allow_oversized))
+      @fh.write(MARC::Writer.encode(record, allow_oversized, **encoding_options))
     end
 
     # close underlying filehandle
@@ -56,28 +59,35 @@ module MARC
       @fh.close
     end
 
-    # a static method that accepts a MARC::Record object
-    # and returns the record encoded as MARC21 in transmission format
+    # Encode a record as MARC 21 transmission bytes. Pass
+    # +external_encoding: "MARC-8"+ to transcode UTF-8 field values to MARC-8.
     #
     # Second arg allow_oversized, default false, set to true
     # to raise on MARC record that can't fit into ISO 2709.
-    def self.encode(record, allow_oversized = false)
+    def self.encode(record, allow_oversized = false, **options)
+      options = options.each_with_object({}) { |(key, value), normalized| normalized[key.to_sym] = value }
+      marc8_output = marc8?(options)
+      original_leader = record.leader.dup if marc8_output
       directory = +""
       fields = +""
       offset = 0
       record.each do |field|
+        transcode_options = marc8_transcode_options(options)
         # encode the field
-        field_data = +""
+        field_data = String.new.force_encoding(Encoding::ASCII_8BIT)
         if field.instance_of?(MARC::DataField)
           warn("Warn:  Missing indicator") unless field.indicator1 && field.indicator2
-          field_data = (field.indicator1 || " ") + (field.indicator2 || " ")
+          field_data << encode_text(field.indicator1 || " ", new_marc8_encoder(options), transcode_options)
+          field_data << encode_text(field.indicator2 || " ", new_marc8_encoder(options), transcode_options)
           field.subfields.each do |s|
-            field_data += SUBFIELD_INDICATOR + s.code + s.value
+            field_data << SUBFIELD_INDICATOR
+            field_data << encode_text(s.code, new_marc8_encoder(options), transcode_options)
+            field_data << encode_text(s.value, new_marc8_encoder(options), transcode_options)
           end
         elsif field.instance_of?(MARC::ControlField)
-          field_data = field.value
+          field_data << encode_text(field.value, new_marc8_encoder(options), transcode_options)
         end
-        field_data += END_OF_FIELD
+        field_data << END_OF_FIELD
 
         # calculate directory entry for the field
         field_length = (field_data.respond_to?(:bytesize) ?
@@ -93,7 +103,10 @@ module MARC
       end
 
       # determine the base (leader + directory)
-      base = record.leader + directory + END_OF_FIELD
+      leader = record.leader.dup
+      leader[9] = " " if marc8_output && leader[9] != " "
+      base = encode_text(leader, nil).force_encoding(Encoding::ASCII_8BIT)
+      base += directory + END_OF_FIELD
 
       # determine complete record
       marc = base + fields + END_OF_RECORD
@@ -106,8 +119,13 @@ module MARC
       bytesize = marc.respond_to?(:bytesize) ? marc.bytesize() : marc.length
       marc[0..4] = format_byte_count(bytesize, allow_oversized)
 
-      # store updated leader in the record that was passed in
-      record.leader = marc[0..LEADER_LENGTH - 1]
+      if marc8_output
+        generated_leader = marc[0..LEADER_LENGTH - 1]
+        generated_leader[9] = original_leader[9]
+        record.leader = generated_leader
+      else
+        record.leader = marc[0..LEADER_LENGTH - 1]
+      end
 
       # return encoded marc
       marc
@@ -133,6 +151,39 @@ module MARC
         end
       end
       formatted
+    end
+
+    def self.marc8?(options)
+      options[:external_encoding].to_s.upcase == "MARC-8"
+    end
+
+    def self.new_marc8_encoder(options)
+      return unless marc8?(options)
+
+      require "marc/marc8/from_unicode" unless defined? MARC::Marc8::FromUnicode
+      encoder_options = {}
+      [:allowed_charsets, :charsets, :invalid, :replace].each do |key|
+        encoder_options[key] = options[key] if options.key?(key)
+      end
+      MARC::Marc8::FromUnicode.new(encoder_options)
+    end
+
+    def self.marc8_transcode_options(options)
+      transcode_options = {}
+      [:invalid, :replace].each do |key|
+        transcode_options[key] = options[key] if options.key?(key)
+      end
+      transcode_options
+    end
+
+    def self.encode_text(value, encoder, options = nil)
+      if encoder
+        text = encoder.transcode(value, options || {})
+      else
+        text = value.to_s
+        text = text.dup
+        text.force_encoding(Encoding::BINARY)
+      end
     end
   end
 end

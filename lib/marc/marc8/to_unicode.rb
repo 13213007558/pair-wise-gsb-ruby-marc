@@ -87,27 +87,30 @@ module MARC
         while pos < marc8_string.length
           if marc8_string[pos] == "\x1b"
             next_byte = marc8_string[pos + 1]
-            if G0_SET.include? next_byte
-              if marc8_string.length >= pos + 3
-                if (marc8_string[pos + 2] == ",") && (next_byte == "$")
-                  pos += 1
+            designation = if G0_SET.include?(next_byte)
+                            {plane: :g0, intermediate: ","}
+                          elsif G1_SET.include?(next_byte)
+                            {plane: :g1, intermediate: "-"}
+                          end
+
+            if designation
+              if next_byte == "$"
+                if marc8_string[pos + 2] == designation[:intermediate]
+                  final_position = pos + 3
+                else
+                  final_position = pos + 2
                 end
-                self.g0 = marc8_string[pos + 2].ord
-                pos += 3
               else
-                # if there aren't enough remaining characters, readd
-                # the escape character so it doesn't get lost; may
-                # help users diagnose problem records
+                final_position = pos + 2
+              end
+
+              if marc8_string.length > final_position
+                public_send("#{designation[:plane]}=", marc8_string[final_position].ord)
+                pos = final_position + 1
+              else
                 uni_list.push marc8_string[pos]
                 pos += 1
               end
-              next
-            elsif G1_SET.include? next_byte
-              if (marc8_string[pos + 2] == "-") && (next_byte == "$")
-                pos += 1
-              end
-              self.g1 = marc8_string[pos + 2].ord
-              pos += 3
               next
             else
               charset = next_byte.ord
@@ -151,7 +154,7 @@ module MARC
             else
               uni_list.push unichr(uni)
               if combinings.length > 0
-                uni_list.concat combinings
+                uni_list.concat combinings.reverse
                 combinings = []
               end
             end

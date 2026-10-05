@@ -335,7 +335,7 @@ module MARC
     # For testing if two records can be considered equal.
 
     def ==(other)
-      to_s == other.to_s
+      to_s.b == other.to_s.b
     end
 
     # Handy for using a record in a regex:

@@ -213,7 +213,7 @@ module MARC
       end
 
       # Only pull in the MARC8 translation if we need it, since it's really big
-      if @encoding_options[:external_encoding] == "MARC-8"
+      if @encoding_options[:external_encoding].to_s.upcase == "MARC-8"
         require "marc/marc8/to_unicode" unless defined? MARC::Marc8::ToUnicode
       end
     end
@@ -297,6 +297,10 @@ module MARC
         # If no forced external_encoding giving, respect the encoding
         # declared on the string passed in.
         params[:external_encoding] = marc.encoding
+      end
+
+      if params[:external_encoding].to_s.upcase == "MARC-8"
+        require "marc/marc8/to_unicode" unless defined? MARC::Marc8::ToUnicode
       end
       # And now that we've recorded the current encoding, we force
       # to binary encoding, because we're going to be doing byte arithmetic,
@@ -426,9 +430,10 @@ module MARC
     def self.set_encoding(str, params)
       if str.respond_to?(:force_encoding)
         if params[:external_encoding]
-          if params[:external_encoding] == "MARC-8"
+          if params[:external_encoding].to_s.upcase == "MARC-8"
             transcode_params = [:invalid, :replace].each_with_object({}) { |k, hash| hash[k] = params[k] if params.has_key?(k) }
-            str = MARC::Marc8::ToUnicode.new.transcode(str, transcode_params)
+            converter = MARC::Marc8::ToUnicode.new
+            str = converter.transcode(str, transcode_params)
           else
             str = str.force_encoding(params[:external_encoding])
           end
@@ -463,6 +468,7 @@ module MARC
       end
       str
     end
+
   end
 
   # Like Reader ForgivingReader lets you read in a batch of MARC21 records
