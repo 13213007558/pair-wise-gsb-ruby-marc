@@ -22,13 +22,38 @@ module MARC
   #
   #    writer = Writer.new(some_path)
   #    writer.allow_oversized = true
+  #
+  # == MARC-8 output
+  #
+  # By default records are written out with their string bytes as-is
+  # (normally UTF-8). To instead transcode records to the legacy MARC-8
+  # character encoding on write, pass the :encoding option:
+  #
+  #    writer = MARC::Writer.new(some_path, :encoding => "MARC-8")
+  #
+  # The leader's character coding scheme flag (byte 9) will be set to
+  # MARC-8, and field byte lengths and directory offsets are computed
+  # from the transcoded MARC-8 bytes. Character set designation state is
+  # reset for every record written. Options for the transcoder
+  # (MARC::Marc8::ToMarc8), such as :charsets, :invalid or :replace, can
+  # be passed along with :marc8_options:
+  #
+  #    writer = MARC::Writer.new(some_path, :encoding => "MARC-8",
+  #      :marc8_options => {:invalid => :replace})
   class Writer
     attr_accessor :allow_oversized
 
     # the constructor which you must pass a file path
-    # or an object that responds to a write message
+    # or an object that responds to a write message.
+    #
+    # Options:
+    #  * encoding: output character encoding. Only "MARC-8" is treated
+    #    specially, transcoding records to MARC-8 on write. Anything else
+    #    (or nothing) leaves record bytes as-is.
+    #  * marc8_options: options hash for MARC::Marc8::ToMarc8, used only
+    #    with encoding "MARC-8".
 
-    def initialize(file, &blk)
+    def initialize(file, options = {}, &blk)
       if file.instance_of?(String)
         @fh = File.new(file, "w")
       elsif file.respond_to?(:write)
@@ -37,6 +62,8 @@ module MARC
         raise ArgumentError, "must pass in file name or handle"
       end
       self.allow_oversized = false
+      @encoding = options[:encoding]
+      @marc8_options = options[:marc8_options] || {}
 
       if block_given?
         blk.call(self)
@@ -47,7 +74,7 @@ module MARC
     # write a record to the file or handle
 
     def write(record)
-      @fh.write(MARC::Writer.encode(record, allow_oversized))
+      @fh.write(MARC::Writer.encode(record, allow_oversized, encoding: @encoding, marc8_options: @marc8_options))
     end
 
     # close underlying filehandle
@@ -61,7 +88,20 @@ module MARC
     #
     # Second arg allow_oversized, default false, set to true
     # to raise on MARC record that can't fit into ISO 2709.
-    def self.encode(record, allow_oversized = false)
+    #
+    # With keyword arg encoding set to "MARC-8", field values are first
+    # transcoded from UTF-8 to MARC-8 (see MARC::Marc8::ToMarc8), and the
+    # leader's character coding scheme flag is set to MARC-8.
+    def self.encode(record, allow_oversized = false, encoding: nil, marc8_options: {})
+      if encoding == "MARC-8"
+        require "marc/marc8/to_marc8" unless defined?(MARC::Marc8::ToMarc8)
+        marc8_record = transcode_record_to_marc8(record, marc8_options)
+        encoded = encode(marc8_record, allow_oversized)
+        # keep the passed-in record's leader in sync, as we do ordinarily
+        record.leader = marc8_record.leader
+        return encoded
+      end
+
       directory = +""
       fields = +""
       offset = 0
@@ -111,6 +151,31 @@ module MARC
 
       # return encoded marc
       marc
+    end
+
+    # Returns a new MARC::Record with all field values transcoded from
+    # UTF-8 to MARC-8 (binary-tagged strings), and the leader's character
+    # coding scheme flag (byte 9) set to MARC-8. A fresh transcoder is
+    # used for every record, so character set designation state never
+    # leaks between records.
+    def self.transcode_record_to_marc8(record, marc8_options = {})
+      transcoder = MARC::Marc8::ToMarc8.new(marc8_options)
+      transcoded = MARC::Record.new
+      leader = record.leader.dup
+      leader[9] = " " # MARC-8 character coding scheme
+      transcoded.leader = leader
+      record.each do |field|
+        if field.instance_of?(MARC::DataField)
+          new_field = MARC::DataField.new(field.tag, field.indicator1, field.indicator2)
+          field.subfields.each do |subfield|
+            new_field.append(MARC::Subfield.new(subfield.code, transcoder.transcode(subfield.value)))
+          end
+          transcoded.append(new_field)
+        elsif field.instance_of?(MARC::ControlField)
+          transcoded.append(MARC::ControlField.new(field.tag, transcoder.transcode(field.value)))
+        end
+      end
+      transcoded
     end
 
     # Formats numbers for insertion into marc binary slots.

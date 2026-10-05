@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- MARC-8 output: new MARC::Marc8::ToMarc8 transcoder converts UTF-8 to
+  MARC-8 (G0/G1 character set switching, EACC multibyte characters, preposed
+  combining marks, caller-restrictable character sets, escape-sequence
+  minimizing output, raise-or-replace handling of unrepresentable
+  characters), and MARC::Writer gained an :encoding => "MARC-8" option
+  that uses it, setting the leader character coding scheme flag and
+  computing field byte lengths and directory offsets from the MARC-8 bytes.
+
 ## [1.4] - 2026-01-22
 
 ### Breaking Change
