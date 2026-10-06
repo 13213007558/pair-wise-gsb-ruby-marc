@@ -32,6 +32,63 @@ end
 ```
 
 
+### Querying records
+
+`MARC::Query` evaluates directly against the field and subfield objects on a
+record; it does not flatten repeated fields or repeated subfields into a plain
+`Hash`. Constraints inside one `field` block must be satisfied by the same field
+occurrence. Separate `field` blocks are independent field-existence constraints.
+
+```ruby
+# Both subfields must occur in the same 700.
+result = MARC::Query.match(record) do
+  field("700") do
+    subfield("e", "editor")
+    subfield("a", "Specific Author")
+  end
+end
+
+result.match?
+result.field_witnesses       # matched field objects and field indexes
+result.subfield_witnesses    # matched subfield objects and positions
+result.witnesses             # including count witnesses
+result.bindings              # named field/value bindings
+```
+
+Top-level conditions combine with AND. Use `any` for OR and `not_` for NOT;
+`not_` is scoped to the record at the top level and to the current field inside a
+field block. Count constraints use `count_fields` and `count_subfields`.
+
+```ruby
+query = MARC::Query.build do
+  count_fields("700", min: 2)
+  any do
+    field("700") { indicator1("1") }
+    field("700") { subfield("e", /editor/i) }
+  end
+  not_ { field("999") }
+
+  field("500") { count_subfields("a", 2..4) }
+end
+```
+
+Independent field blocks can be related through a named value or MARC linkage
+subfield `$8`. The second field below must be a distinct occurrence and must be
+in the same `$8` link group as the first field.
+
+```ruby
+MARC::Query.match(record) do
+  field("700", as: :person, link: :group) do
+    subfield("a", "Specific Author")
+  end
+
+  field("880", link: :group) do
+    linked_to(:person)
+    subfield("e", "editor")
+  end
+end
+```
+
 ### Reading / Writing MARC21 binary data
 
 ```ruby

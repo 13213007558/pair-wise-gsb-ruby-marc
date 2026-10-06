@@ -301,6 +301,14 @@ module MARC
       MARC::JSONLWriter.encode(self)
     end
 
+    def query(&block)
+      MARC::Query.build(&block).match(self)
+    end
+
+    def query?(&block)
+      query(&block).match?
+    end
+
     def self.new_from_hash(h)
       r = new
       r.leader = h["leader"]
