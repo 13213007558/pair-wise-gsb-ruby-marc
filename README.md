@@ -32,6 +32,55 @@ end
 ```
 
 
+### Querying records
+
+`MARC::Query` is a composable query interface that distinguishes
+*same-field* constraints from *cross-field* existential constraints.
+Constraints built inside one `MARC::Query.field` block must all hold
+for a single field occurrence, so a record where one 700 has the
+author and a different 700 has the role does not match:
+
+```ruby
+# Does ONE 700 have role editor AND this author?
+query = MARC::Query.field("700") do |f|
+  f.all(
+    f.subfield("e").value(/editor/),
+    f.subfield("a").value(/Twain, Mark/)
+  )
+end
+query.matches?(record)
+
+# Two independent 700s may satisfy these separately:
+MARC::Query.all(
+  MARC::Query.field("700") { |f| f.subfield("a").value(/Twain/) },
+  MARC::Query.field("700") { |f| f.subfield("e").value("editor") }
+)
+```
+
+Fields can be bound to names, and a captured subfield value can
+constrain another field (for example fields linked through a shared
+subfield 8 value):
+
+```ruby
+query = MARC::Query.all(
+  MARC::Query.field("700", as: :main) { |f| f.subfield("8").bind(as: :link) },
+  MARC::Query.field("880", as: :alt) { |f| f.subfield("8").value(MARC::Query.ref(:link)) }
+)
+result = query.run(record)
+result.success?        # boolean
+result.values[:link]   # the captured value
+result.bindings[:main] # the matching field, its index, and subfield positions
+```
+
+`Query.all` (AND), `Query.any` (OR), `Query.not` / `Query.none` (NOT)
+and `Query.count` (quantity conditions) compose at the record level;
+inside a field block `f.all`, `f.any` and `f.not` compose constraints
+on that one occurrence. The scope of NOT is determined by the layer
+it appears in. Successful results expose the concrete fields and
+subfield positions that made the query succeed; failed results carry
+no witnesses. Queries operate directly on the record's field and
+subfield objects, never on a lossy hash conversion.
+
 ### Reading / Writing MARC21 binary data
 
 ```ruby
